@@ -41,8 +41,7 @@
 - s3 池配置:bucket(可带 `:/前缀`)、Region、自定义 Endpoint、AK/SK
   (管理接口不回传 Secret),Web 一键连接测试。
   **MinIO 等兼容存储直接填用户名/密码**(即 AccessKey/SecretKey),
-  Endpoint 填如 `http://<minio-host>:9000`,已对真实 MinIO 跑通全量端到端测试
-  (`tests/test_minio.py`,通过环境变量指定地址与凭证)
+  Endpoint 填如 `http://<minio-host>:9000`,已对真实 MinIO 跑通全量端到端验证
 - **凭证透传**:s3 池可开启"使用 FTP 登录凭证作为 S3 AK/SK"——每个用户用自己的
   对象存储密钥登录(用户名=AccessKey,密码=SecretKey),登录时通过一次最小 S3
   请求校验凭证,权限由对象存储侧控制,服务器不存储任何密钥
@@ -69,37 +68,27 @@
 
 ## 快速开始
 
-```bash
-cargo build --release
-./target/release/engiftp            # 默认数据目录 ./data
-./target/release/engiftp /etc/ftpd  # 或指定数据目录
-```
+直接运行对应平台的程序即可,**无需安装任何依赖**(Linux 为 musl 静态链接,拷贝即跑):
 
-### Linux 部署(systemd 一键安装)
+| 平台 | 程序文件 |
+|---|---|
+| Linux x86_64 | `engiftp-linux-amd64` |
+| Linux ARM64 | `engiftp-linux-arm64` |
+| macOS Intel | `engiftp-macos-amd64` |
+| macOS Apple Silicon | `engiftp-macos-arm64` |
+| Windows x86_64 | `engiftp-windows-amd64.exe` |
 
-```bash
-./build-linux.sh                    # 在 macOS/任意开发机上交叉编译
-                                    # 产物: dist/engiftp-linux-amd64 / engiftp-linux-arm64
-scp dist/engiftp-linux-amd64 server:/tmp/engiftp
-ssh server 'sudo /tmp/engiftp install'   # 复制到 /usr/local/bin、生成并启用 systemd 服务
-```
-
-`install` 子命令会:创建数据目录(默认 `/var/lib/engiftp`,可用 `install /自定义路径` 指定)、
-安装二进制到 `/usr/local/bin/engiftp`、写入 `/etc/systemd/system/engiftp.service`
-(含 `Restart=on-failure`、`LimitNOFILE=65536`)、`systemctl enable --now` 开机自启。
-**在线更新**:编译出新版后一条命令完成更新(停服务 → 备份旧版 → 替换 → 重启;
-新版本启动失败会**自动回滚**旧版本并恢复服务):
+**Linux / macOS**:
 
 ```bash
-scp dist/engiftp-linux-amd64 server:/tmp/engiftp-new
-ssh server 'sudo /tmp/engiftp-new update'      # 新二进制自我安装
-# 或: sudo engiftp update /tmp/engiftp-new     # 由已安装程序执行
+chmod +x engiftp-linux-amd64
+./engiftp-linux-amd64                 # 默认数据目录 ./data
+./engiftp-linux-amd64 /etc/engiftp    # 或指定数据目录
 ```
 
-卸载:`sudo engiftp uninstall`(保留数据目录)。
+> macOS 首次运行若被 Gatekeeper 拦截:执行 `xattr -d com.apple.quarantine engiftp-macos-arm64` 后再运行。
 
-交叉编译为 musl 静态链接,无任何运行库依赖,兼容所有 Linux 发行版;
-依赖工具:`brew install zig cargo-zigbuild`(或参考 build-linux.sh 自行准备)。
+**Windows**:在终端运行 `engiftp-windows-amd64.exe [数据目录]`(或直接双击,数据目录为当前目录下 `data`)。
 
 首次启动会生成默认配置并打印管理员初始账号:
 
@@ -108,13 +97,43 @@ Web 管理界面: http://127.0.0.1:8080
 管理员账号: admin  初始密码: admin123   ← 请立即登录修改
 ```
 
-然后在 Web 界面中创建 FTP 用户,即可用任意 FTP 客户端连接:
+浏览器打开 Web 管理界面,按初始化向导设置管理员与基本参数,然后创建 FTP 用户,即可用任意 FTP 客户端连接:
 
 ```bash
-ftp 127.0.0.1 2121
+ftp <服务器IP> 2121
 # 或
-curl -T file.txt ftp://127.0.0.1:2121/ --user alice:密码
+curl -T file.txt ftp://<服务器IP>:2121/ --user alice:密码
 ```
+
+### Linux 安装为系统服务(systemd)
+
+将 Linux 程序拷到服务器,用 `install` 子命令一键安装为开机自启服务(需 root):
+
+```bash
+scp dist/engiftp-linux-amd64 server:/tmp/engiftp
+ssh server 'sudo /tmp/engiftp install'         # 默认数据目录 /var/lib/engiftp
+# 指定数据目录: sudo /tmp/engiftp install /自定义/路径
+```
+
+`install` 会:创建数据目录、安装到 `/usr/local/bin/engiftp`、写入
+`/etc/systemd/system/engiftp.service`(含 `Restart=on-failure`、`LimitNOFILE=65536`)、
+`systemctl enable --now` 开机自启。常用运维命令:
+
+```bash
+systemctl status engiftp     # 查看状态
+systemctl restart engiftp    # 重启
+journalctl -u engiftp -f     # 查看日志
+```
+
+**升级到新版本**(停服务 → 备份旧版 → 替换 → 重启;新版启动失败会**自动回滚**旧版并恢复服务):
+
+```bash
+scp dist/engiftp-linux-amd64 server:/tmp/engiftp-new
+ssh server 'sudo /tmp/engiftp-new update'      # 新程序自我安装
+# 或: sudo engiftp update /tmp/engiftp-new      # 由已安装程序执行
+```
+
+**卸载**:`sudo engiftp uninstall`(保留数据目录)。
 
 ## 默认配置
 
@@ -189,47 +208,36 @@ curl -T file.txt ftp://127.0.0.1:2121/ --user alice:密码
 
 ### 多语言界面
 
-Web 管理界面支持简体中文与英文。点击登录页或侧边栏底部的 **EN / 中文** 开关即可切换,
-选择持久化在浏览器(localStorage),下次访问自动应用。
+- **Web 管理界面 / Web 运行日志**:支持简体中文与英文。点击登录页或侧边栏底部的
+  **EN / 中文** 开关即可切换,选择持久化在浏览器,下次访问自动应用。
+- **命令行输出 / 控制台日志**:由环境变量 `ENGIFTP_LANG` 控制(`en` / `zh`);
+  不设置则跟随系统 locale,默认中文。例如:`ENGIFTP_LANG=en ./engiftp`。
 
-## 测试
-
-`tests/run_tests.py` 是全量集成测试(205 项),自动以多种配置拉起服务器
-(并内置一个 Mock S3 服务用于对象存储端到端验证),覆盖:
-协议一致性(全部命令、断点续传、ASCII/二进制、中文文件名、路径穿越防护)、
-权限矩阵、网络环境模拟(主动/被动模式、EPSV/EPRT、NAT、IPv6、局域网、
-防火墙阻断数据连接、慢速客户端、传输中断线、空闲超时、暴力破解、超长命令行)、
-16 路并发读写、被动端口 TIME_WAIT 复用、连接数上限、多编码转码
-(GBK 客户端自动转码、OPTS UTF8、用户级强制编码优先级)、存储池管理
-(本地池分配落盘、池内子目录越界防护、禁用守护、密钥脱敏、S3 直连端到端:
-上传/下载/Range 续传/20MB 分段上传/目录语义/递归重命名/2500 文件分页列表/
-凭证透传登录与拒绝)、全部 Web 管理 API,
-以及海量并发场景(1050 个会话同时在线 + 叠加 100 路并发传输,校验延迟、
-数据完整性、内存占用与断开后的资源回收)。
-
-```bash
-cargo build --release && python3 tests/run_tests.py
-```
-
-## 项目结构
+## 命令行用法
 
 ```
-src/
-├── main.rs          # 启动入口:加载配置、并行启动 FTP 与 Web 服务
-├── config.rs        # 服务器配置(config.json)
-├── users.rs         # 用户存储、密码哈希(users.json)
-├── install.rs       # Linux systemd 安装/卸载/更新子命令
-├── tls.rs           # FTPS 显式 TLS:证书加载/自签生成
-├── stats.rs         # 存储统计:按池统计文件数/占用(本地 walk / S3 流式)
-├── storage.rs       # 存储池定义与后端构建、缓存后台扫描(pools.json)
-├── cache.rs         # S3 目录缓存:列表/元数据 TTL 缓存、热点刷新
-├── backend.rs       # 存储后端抽象:本地磁盘 / S3 统一文件操作接口
-├── s3.rs            # S3 REST 客户端:SigV4 签名、分页列表、分段上传
-├── state.rs         # 全局共享状态:会话注册表、日志环形缓冲、Web 令牌
-├── ftp/
-│   ├── mod.rs       # FTP 监听与连接接入(连接数限制、会话注册)
-│   └── session.rs   # FTP 协议核心:命令解析与全部命令实现
-└── web/
-    ├── mod.rs       # Web 管理 REST API(axum)
-    └── index.html   # 管理界面(单页应用,编译时内嵌进二进制)
+engiftp [数据目录]          启动服务(默认数据目录 ./data)
+engiftp install [数据目录]  安装为 systemd 服务并启用(Linux,需 root)
+engiftp update [新程序]     更新已安装的程序并重启服务(失败自动回滚)
+engiftp uninstall           停用并移除 systemd 服务(保留数据目录)
+engiftp help                显示帮助
 ```
+
+## 数据与文件
+
+所有数据都在你指定的**数据目录**内,迁移/备份直接拷该目录即可:
+
+| 文件 | 用途 |
+|---|---|
+| `config.json` | 服务器配置(端口、编码、FTPS 等) |
+| `users.json` | FTP 用户、权限、密码哈希 |
+| `pools.json` | 存储池配置 |
+| `license.json` / `device_id` | 企业授权凭证与机器码 |
+| `cert.pem` / `key.pem` | FTPS 自签证书(可替换为正式证书) |
+| `audit.redb` / `index.redb` | 操作审计日志 / S3 全局索引 |
+
+> 含凭证的文件会自动收紧为 `0600`,数据目录为 `0700`。
+
+---
+
+<sub>开发者:从源码构建需 Rust 工具链,`cargo build --release`;全平台交叉编译见 `build-all.sh`。</sub>

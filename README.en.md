@@ -40,8 +40,7 @@ The FTP protocol is implemented from scratch on the tokio async runtime; the web
 - S3 pool config: bucket (optionally with `:/prefix`), Region, custom Endpoint, AK/SK
   (the admin API never returns the Secret), one-click connection test in the web UI.
   **For MinIO-compatible storage, just fill in the username/password** (i.e. AccessKey/SecretKey),
-  set Endpoint to e.g. `http://<minio-host>:9000`; full end-to-end tests pass against real MinIO
-  (`tests/test_minio.py`, with address and credentials given via environment variables)
+  set Endpoint to e.g. `http://<minio-host>:9000`; fully verified end-to-end against real MinIO
 - **Credential pass-through**: an s3 pool can enable "use FTP login credentials as S3 AK/SK" — each user logs in with their own
   object-storage keys (username = AccessKey, password = SecretKey), validated by a minimal S3 request at login; permissions are controlled by the object-storage side, and the server stores no keys
 - **Directory cache & background scan**: S3 directory listings and metadata have a TTL cache (default 60 s, configurable in Settings, 0 = off).
@@ -62,37 +61,27 @@ The FTP protocol is implemented from scratch on the tokio async runtime; the web
 
 ## Quick Start
 
-```bash
-cargo build --release
-./target/release/engiftp            # default data dir ./data
-./target/release/engiftp /etc/ftpd  # or a specific data dir
-```
+Just run the binary for your platform — **no dependencies to install** (the Linux builds are static musl binaries; copy and run):
 
-### Linux Deployment (one-command systemd install)
+| Platform | Binary |
+|---|---|
+| Linux x86_64 | `engiftp-linux-amd64` |
+| Linux ARM64 | `engiftp-linux-arm64` |
+| macOS Intel | `engiftp-macos-amd64` |
+| macOS Apple Silicon | `engiftp-macos-arm64` |
+| Windows x86_64 | `engiftp-windows-amd64.exe` |
 
-```bash
-./build-linux.sh                    # cross-compile on macOS / any dev machine
-                                    # output: dist/engiftp-linux-amd64 / engiftp-linux-arm64
-scp dist/engiftp-linux-amd64 server:/tmp/engiftp
-ssh server 'sudo /tmp/engiftp install'   # copies to /usr/local/bin, generates and enables the systemd service
-```
-
-The `install` subcommand will: create the data directory (default `/var/lib/engiftp`, override with `install /custom/path`),
-install the binary to `/usr/local/bin/engiftp`, write `/etc/systemd/system/engiftp.service`
-(with `Restart=on-failure`, `LimitNOFILE=65536`), and `systemctl enable --now` for auto-start on boot.
-**Online update**: once a new build is ready, update in one command (stop service → back up old version → replace → restart;
-if the new version fails to start it **automatically rolls back** to the old one and restores the service):
+**Linux / macOS**:
 
 ```bash
-scp dist/engiftp-linux-amd64 server:/tmp/engiftp-new
-ssh server 'sudo /tmp/engiftp-new update'      # the new binary installs itself
-# or: sudo engiftp update /tmp/engiftp-new      # run by the already-installed program
+chmod +x engiftp-linux-amd64
+./engiftp-linux-amd64                 # default data dir ./data
+./engiftp-linux-amd64 /etc/engiftp    # or a specific data dir
 ```
 
-Uninstall: `sudo engiftp uninstall` (keeps the data directory).
+> On macOS, if Gatekeeper blocks the first run: `xattr -d com.apple.quarantine engiftp-macos-arm64`, then run it.
 
-Cross-compiled to a musl static binary with no runtime dependencies, compatible with all Linux distributions;
-required tools: `brew install zig cargo-zigbuild` (or prepare them per build-linux.sh).
+**Windows**: run `engiftp-windows-amd64.exe [data-dir]` in a terminal (or double-click; the data dir defaults to `data` in the current folder).
 
 On first launch, a default config is generated and the initial admin account is printed:
 
@@ -101,22 +90,43 @@ Web console: http://127.0.0.1:8080
 Admin: admin  Initial password: admin123   ← log in and change it immediately
 ```
 
-Then create FTP users in the web UI and connect with any FTP client:
+Open the web console, follow the setup wizard (set the admin and basic parameters), create FTP users, then connect with any FTP client:
 
 ```bash
-ftp 127.0.0.1 2121
+ftp <server-IP> 2121
 # or
-curl -T file.txt ftp://127.0.0.1:2121/ --user alice:password
+curl -T file.txt ftp://<server-IP>:2121/ --user alice:password
 ```
 
-## Cross-platform Build
+### Install as a system service on Linux (systemd)
+
+Copy the Linux binary to the server and use the `install` subcommand to install it as an auto-start service (requires root):
 
 ```bash
-./build-all.sh     # build five targets at once into dist/ (with SHA256SUMS.txt)
+scp dist/engiftp-linux-amd64 server:/tmp/engiftp
+ssh server 'sudo /tmp/engiftp install'         # default data dir /var/lib/engiftp
+# custom data dir: sudo /tmp/engiftp install /custom/path
 ```
 
-Targets: Linux amd64 / arm64 (musl static), macOS amd64 / arm64, Windows amd64.
-Required tools: `brew install zig cargo-zigbuild`.
+`install` will: create the data directory, install to `/usr/local/bin/engiftp`, write
+`/etc/systemd/system/engiftp.service` (with `Restart=on-failure`, `LimitNOFILE=65536`), and
+`systemctl enable --now` for auto-start on boot. Common operations:
+
+```bash
+systemctl status engiftp     # status
+systemctl restart engiftp    # restart
+journalctl -u engiftp -f     # logs
+```
+
+**Update to a new version** (stop service → back up old → replace → restart; **auto-rollback** if the new version fails to start):
+
+```bash
+scp dist/engiftp-linux-amd64 server:/tmp/engiftp-new
+ssh server 'sudo /tmp/engiftp-new update'      # the new binary installs itself
+# or: sudo engiftp update /tmp/engiftp-new      # run by the already-installed program
+```
+
+**Uninstall**: `sudo engiftp uninstall` (keeps the data directory).
 
 ## Default Configuration
 
@@ -188,52 +198,38 @@ The program reports a heartbeat **silently** in the background (product ID, vers
 and then every 6 hours. It never blocks the main flow; any network/reporting failure is ignored and not logged.
 Enabled only when a server URL is configured.
 
-### Multi-language UI
+### Languages
 
-The web console supports Simplified Chinese and English. Use the **EN / 中文** toggle on the login page or in the sidebar footer;
-the choice is persisted in the browser (localStorage) and applied automatically on the next visit.
+- **Web console / web runtime logs**: Simplified Chinese and English. Use the **EN / 中文** toggle on the login page
+  or in the sidebar footer; the choice is persisted in the browser and applied automatically next time.
+- **CLI output / console logs**: controlled by the `ENGIFTP_LANG` environment variable (`en` / `zh`); if unset it
+  follows the system locale, defaulting to Chinese. Example: `ENGIFTP_LANG=en ./engiftp`.
 
-## Testing
-
-`tests/run_tests.py` is the full integration suite (205 cases), which launches the server in various configurations automatically
-(with a built-in Mock S3 service for object-storage end-to-end verification), covering:
-protocol conformance (all commands, resume, ASCII/binary, Chinese filenames, path-traversal protection),
-the permission matrix, network-environment simulation (active/passive, EPSV/EPRT, NAT, IPv6, LAN,
-firewall-blocked data connections, slow clients, mid-transfer disconnects, idle timeout, brute force, over-long command lines),
-16-way concurrent read/write, passive-port TIME_WAIT reuse, connection limit, multi-encoding transcoding
-(automatic GBK client transcoding, OPTS UTF8, per-user forced-encoding priority), storage-pool management
-(local pool allocation to disk, in-pool sub-directory boundary protection, disable guard, secret redaction, S3 direct end-to-end:
-upload/download/Range resume/20 MB multipart upload/directory semantics/recursive rename/2500-file paginated listing/
-credential pass-through login and rejection), all web admin APIs,
-plus massive-concurrency scenarios (1050 sessions online at once + 100 concurrent transfers on top, verifying latency,
-data integrity, memory usage, and resource reclamation after disconnect).
-
-```bash
-cargo build --release && python3 tests/run_tests.py
-```
-
-## Project Structure
+## Command-line Usage
 
 ```
-src/
-├── main.rs          # entry point: load config, start FTP and web services in parallel
-├── config.rs        # server configuration (config.json)
-├── users.rs         # user store, password hashing (users.json)
-├── license.rs       # serial-number authentication & licensing (license.json, device_id)
-├── install.rs       # Linux systemd install/uninstall/update subcommands
-├── tls.rs           # FTPS explicit TLS: certificate load / self-sign generation
-├── stats.rs         # storage stats: per-pool file count/size (local walk / S3 streaming)
-├── storage.rs       # storage-pool definitions, backend construction, cache background scan (pools.json)
-├── cache.rs         # S3 directory cache: listing/metadata TTL cache, hot-spot refresh
-├── audit.rs         # FTP operation audit log (redb persistence)
-├── index.rs         # global file index (redb) for fast listing of large S3 buckets
-├── backend.rs       # storage backend abstraction: unified file ops for local disk / S3
-├── s3.rs            # S3 REST client: SigV4 signing, paginated listing, multipart upload
-├── state.rs         # global shared state: session registry, log ring buffer, web tokens, license
-├── ftp/
-│   ├── mod.rs       # FTP listener and connection acceptance (connection limit, session registry)
-│   └── session.rs   # FTP protocol core: command parsing and all command implementations
-└── web/
-    ├── mod.rs       # web admin REST API (axum)
-    └── index.html   # admin UI (single-page app with i18n, embedded into the binary at compile time)
+engiftp [data-dir]          Start the server (default data dir ./data)
+engiftp install [data-dir]  Install and enable as a systemd service (Linux, root)
+engiftp update [new-binary] Update the installed program and restart (auto-rollback on failure)
+engiftp uninstall           Stop and remove the systemd service (keeps the data dir)
+engiftp help                Show help
 ```
+
+## Data & Files
+
+Everything lives inside the **data directory** you specify — back up or migrate by copying that directory:
+
+| File | Purpose |
+|---|---|
+| `config.json` | Server configuration (ports, encoding, FTPS, etc.) |
+| `users.json` | FTP users, permissions, password hashes |
+| `pools.json` | Storage pool configuration |
+| `license.json` / `device_id` | Enterprise license credentials and machine code |
+| `cert.pem` / `key.pem` | FTPS self-signed certificate (replaceable with a real one) |
+| `audit.redb` / `index.redb` | Operation audit log / S3 global index |
+
+> Files containing credentials are tightened to `0600`, and the data directory to `0700`.
+
+---
+
+<sub>For developers: building from source requires the Rust toolchain (`cargo build --release`); see `build-all.sh` for cross-platform builds.</sub>
