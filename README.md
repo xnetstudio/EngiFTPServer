@@ -240,4 +240,4 @@ engiftp help                显示帮助
 
 ---
 
-<sub>开发者:从源码构建需 Rust 工具链,`cargo build --release`;全平台交叉编译见 `build-all.sh`。</sub>
+
