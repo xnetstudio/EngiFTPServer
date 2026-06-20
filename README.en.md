@@ -232,4 +232,4 @@ Everything lives inside the **data directory** you specify — back up or migrat
 
 ---
 
-<sub>For developers: building from source requires the Rust toolchain (`cargo build --release`); see `build-all.sh` for cross-platform builds.</sub>
+
